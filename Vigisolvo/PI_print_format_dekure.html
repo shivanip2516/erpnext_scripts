@@ -1,1 +1,745 @@
+{% set cust = frappe.get_doc("Address", doc.customer_address) if doc.customer_address else None %}
+{% set bank = frappe.get_doc("Bank Account", doc.company_bank_account) if doc.company_bank_account else None %}
+{% set customer_doc = frappe.get_doc("Customer", doc.party_name) if doc.party_name else None %}
+{%- set is_inter_state = ( doc.supplier_gstin and doc.company_gstin and doc.supplier_gstin[:2] != doc.company_gstin[:2] ) -%}
 
+{% set tax_ns = namespace(rows=[]) %}
+{% for item in doc.items %}
+    {% set igst_r = item.igst_rate or 0 %}
+    {% set cgst_r = item.cgst_rate or 0 %}
+    {% set sgst_r = item.sgst_rate or 0 %}
+
+    {% if is_inter_state %}
+        {% set r = igst_r if igst_r > 0 else (cgst_r + sgst_r) %}
+        {% set r = r|int if r % 1 == 0 else r %}
+        {% if r > 0 %}
+            {% set lbl = "IGST @" ~ r ~ "%" %}
+            {% if lbl not in (tax_ns.rows | map(attribute=0) | list) %}
+                {% set grp_amt = namespace(total=0) %}
+                {% for i in doc.items %}
+                    {% set i_igst_r = i.igst_rate or 0 %}
+                    {% set i_cgst_r = i.cgst_rate or 0 %}
+                    {% set i_sgst_r = i.sgst_rate or 0 %}
+                    {% set i_r = i_igst_r if i_igst_r > 0 else (i_cgst_r + i_sgst_r) %}
+                    {% if i_r == r %}
+                        {% set grp_amt.total = grp_amt.total + ((i.amount or 0) * r / 100) %}
+                    {% endif %}
+                {% endfor %}
+                {% set tax_ns.rows = tax_ns.rows + [(lbl, grp_amt.total)] %}
+            {% endif %}
+        {% endif %}
+    {% else %}
+        {% if cgst_r > 0 or sgst_r > 0 %}
+            {% set rc = cgst_r|int if cgst_r % 1 == 0 else cgst_r %}
+            {% set rs = sgst_r|int if sgst_r % 1 == 0 else sgst_r %}
+            {% set cgst_lbl = "CGST @" ~ rc ~ "%" %}
+{% set sgst_lbl = "SGST @" ~ rs ~ "%" %}
+
+{% if cgst_lbl not in (tax_ns.rows | map(attribute=0) | list) %}
+
+    {% set cgst_amt = namespace(total=0) %}
+    {% set sgst_amt = namespace(total=0) %}
+
+    {% for i in doc.items %}
+        {% set i_cgst_r = i.cgst_rate or 0 %}
+        {% set i_sgst_r = i.sgst_rate or 0 %}
+
+        {% if i_cgst_r == cgst_r and i_sgst_r == sgst_r %}
+            {% set cgst_amt.total = cgst_amt.total + ((i.amount or 0) * cgst_r / 100) %}
+            {% set sgst_amt.total = sgst_amt.total + ((i.amount or 0) * sgst_r / 100) %}
+        {% endif %}
+    {% endfor %}
+
+    {% set tax_ns.rows = tax_ns.rows + [
+        (cgst_lbl, cgst_amt.total),
+        (sgst_lbl, sgst_amt.total)
+    ] %}
+
+{% endif %}
+        {% endif %}
+    {% endif %}
+{% endfor %}
+
+{% set approved_name = frappe.db.get_value("User", doc.custom_account_manager, "full_name") if doc.custom_account_manager else "" %}
+{% set approved_time = doc.modified if doc.modified else "" %}
+
+<style>
+
+body{
+    font-family: Arial, Helvetica, sans-serif;
+    font-size:10px;
+    line-height:1.2;
+}
+
+table{
+    width:100%;
+    border-collapse:collapse;
+    margin:0;
+}
+
+.items-table{
+    width:100%;
+    border-collapse:collapse;
+    table-layout:fixed;
+    page-break-inside:auto !important;
+}
+
+.items-table td,
+.items-table th{
+    padding:2px 3px;
+    vertical-align:top;
+}
+
+td, th{
+    border:1px solid #000;
+    padding:3px;
+    word-wrap:break-word;
+    overflow-wrap:break-word;
+    word-break:break-word;
+}
+
+/* item rows: only side borders, so multiple rows look like one cell */
+.item-row td,
+.desc-row td{
+    border-left: 1px solid #000;
+    border-right: 1px solid #000;
+    border-top: none;
+    border-bottom: none;
+}
+
+.desc-row td{
+    padding-top:0;
+    padding-bottom:0;
+    font-size:9px;
+    line-height:1.1;
+}
+
+/* force wkhtmltopdf / frappe print css to allow breaking between rows */
+.items-table tr,
+.items-table td,
+.item-row,
+.desc-row{
+    page-break-inside: auto !important;
+    break-inside: auto !important;
+    page-break-after: auto !important;
+    page-break-before: auto !important;
+}
+
+.no-border,
+.no-border td,
+.no-border th{
+    border:none !important;
+}
+
+p{
+    margin:0;
+}
+
+.text-right{
+    text-align:right;
+}
+
+.text-center{
+    text-align:center;
+}
+
+.invoice-grid{
+    width:100%;
+    border-collapse:collapse;
+}
+
+.invoice-grid > tbody > tr > td{
+    border:1px solid #000;
+    vertical-align:top;
+    padding:4px;
+}
+
+.header-bg{
+    background:#e6e6e6 !important;
+    color:#000 !important;
+    font-weight:bold;
+    font-size:10px;
+}
+
+.hsn-summary{
+    width:100%;
+    border-collapse:collapse;
+    table-layout:fixed;
+    font-size:10px;
+    page-break-inside: avoid;
+    break-inside: avoid;
+}
+
+.hsn-summary th,
+.hsn-summary td{
+    border:1px solid #000;
+    padding:2px;
+    text-align:center;
+    vertical-align:middle;
+}
+
+.hsn-summary th{
+    font-weight:bold;
+    color:#000 !important;
+    background:#d9d9d9 !important;
+}
+
+.hsn-summary td{
+    white-space:normal;
+    word-break:break-word;
+}
+
+.hsn-summary .amt{
+    text-align:right;
+}
+
+.hsn-summary tbody tr:last-child td{
+    font-weight:bold;
+}
+
+/* Beat Frappe's .print-format td padding that inflates all cells */
+.print-format .items-table td,
+.print-format .items-table th,
+.items-table td,
+.items-table th{
+    padding:3px 3px !important;
+}
+
+.print-format .desc-row td,
+.desc-row td{
+    padding:1px 3px !important;
+    font-size:9px;
+    line-height:1.25;
+}
+
+.print-format .invoice-grid > tbody > tr > td,
+.invoice-grid > tbody > tr > td{
+    padding:4px !important;
+}
+
+.print-format .hsn-summary td,
+.print-format .hsn-summary th,
+.hsn-summary td,
+.hsn-summary th{
+    padding:2px !important;
+}
+
+.print-format .invoice-grid > tbody > tr > td.qno-box,
+.invoice-grid > tbody > tr > td.qno-box{
+    padding:0 !important;
+}
+</style>
+
+<!-- TITLE -->
+<table>
+<tr>
+<td class="no-border"><b>PURCHASE INVOICE</b></td>
+</tr>
+</table>
+
+
+<table class="invoice-grid">
+<tbody>
+
+<!-- HEADER ROW 1: single full-width box with all company details -->
+
+<tr>
+
+<td colspan="2" style="text-align:left">
+
+<!-- logo left + details right using nested table (no flexbox in wkhtmltopdf) -->
+<table class="no-border" style="width:100%; border-collapse:collapse;">
+<tr>
+<td width="120"
+    align="left"
+    valign="middle"
+    style="
+        padding:0;
+        text-align:left;
+        vertical-align:middle;
+    ">
+    <img src="/files/Dekure_final.png"
+         width="110"
+         style="
+             display:inline-block;
+             vertical-align:middle;
+             line-height:normal;
+             border:0;
+         ">
+</td>
+<td class="no-border" style="vertical-align:middle; padding:0; line-height:1.15;">
+
+{% set company = frappe.get_doc("Company", doc.company) %}
+
+<strong style="font-size:14px;">{{ doc.company }}</strong><br>
+
+{% set addr = frappe.get_doc("Address", doc.billing_address) if doc.billing_address else None %}
+
+{% if addr %}
+    {%- set addr_parts = [] -%}
+    {%- if addr.address_line1 %}{% set addr_parts = addr_parts + [addr.address_line1] %}{% endif -%}
+    {%- if addr.address_line2 %}{% set addr_parts = addr_parts + [addr.address_line2] %}{% endif -%}
+    {%- if addr.city %}{% set addr_parts = addr_parts + [addr.city] %}{% endif -%}
+    {%- if addr.state %}{% set addr_parts = addr_parts + [addr.state] %}{% endif -%}
+    {%- if addr.pincode %}{% set addr_parts = addr_parts + [addr.pincode] %}{% endif -%}
+    {%- if addr.country %}{% set addr_parts = addr_parts + [addr.country] %}{% endif -%}
+    {{ addr_parts | join(", ") }}<br>
+
+    {% if addr.gstin %}
+        <strong>GSTIN:</strong> {{ addr.gstin }}
+        {%- if company.phone_no %} | <strong>Mobile:</strong> {{ company.phone_no }}{% endif -%}
+        {%- if company.pan %} | <strong>PAN:</strong> {{ company.pan }}{% endif -%}
+        {%- if company.email %} | <strong>Email:</strong> <span style="white-space:nowrap;">{{ company.email }}</span>{% endif -%}
+        <br>
+    {% endif %}
+{% endif %}
+
+{% if not addr or not addr.gstin %}
+    {% if company.phone_no %}<strong>Mobile:</strong> {{ company.phone_no }}<br>{% endif %}
+    {% if company.pan %}<strong>PAN:</strong> {{ company.pan }}<br>{% endif %}
+    {% if company.email %}<strong>Email:</strong> <span style="white-space:nowrap;">{{ company.email }}</span><br>{% endif %}
+{% endif %}
+
+{% if company.company_website %}
+<strong>Website:</strong> {{ company.company_website }}<br>
+{% endif %}
+
+{% if company.company_msme %}
+<strong>MSME:</strong> {{ company.company_msme }}
+{% endif %}
+
+</td>
+</tr>
+</table>
+
+</td>
+
+</tr>
+
+<!-- HEADER ROW 2: simple box with PI No. and Date -->
+
+<tr>
+
+<td colspan="2" class="qno-box" style="padding:0 !important;">
+
+<table class="no-border" style="width:100%; border-collapse:collapse;">
+<tr>
+<td class="no-border text-center" width="55%" style="vertical-align:middle; padding:2px 4px;">
+    <b>PU No.</b><br>
+    <span style="white-space:nowrap;">{{ doc.name }}</span>
+</td>
+<td class="text-center" width="45%" style="border:none; border-left:1px solid #000; vertical-align:middle; padding:2px 4px;">
+    <b>PU Date</b><br>
+    {{ frappe.utils.formatdate(doc.posting_date, "dd/MM/yyyy") }}
+</td>
+</tr>
+</table>
+
+</td>
+
+</tr>
+
+
+<!-- BILL / SHIP ROW -->
+
+<tr>
+
+<td width="50%" style="text-align:left">
+
+<b>Supplier</b><br>
+
+<b>{{ doc.supplier_name }}</b><br>
+
+{{ doc.address_display
+    | replace("<br>\nPhone:", "|||BREAK|||<b>Phone:</b>")
+    | replace("<br>Phone:", "|||BREAK|||<b>Phone:</b>")
+    | replace("<br>\nEmail:", "|||BREAK|||<b>Email:</b>")
+    | replace("<br>Email:", "|||BREAK|||<b>Email:</b>")
+    | replace("<br>\nGSTIN:", "|||BREAK|||<b>GSTIN:</b>")
+    | replace("<br>GSTIN:", "|||BREAK|||<b>GSTIN:</b>")
+    | replace("<br>\n", ", ")
+    | replace("<br>", ", ")
+    | replace("|||BREAK|||", "<br>")
+    | replace(", , ", ", ")
+    | trim(", \n")
+}}<br>
+<b>Place of Supply:</b> {{ doc.place_of_supply }}<br>
+
+{% if doc.contact_display %}
+<b>Contact Person:</b> {{ doc.contact_display }}<br>
+{% endif %}
+{% if doc.contact_mobile %}
+<b>Mobile:</b> {{ doc.contact_mobile }}<br>
+{% endif %}
+{% if doc.contact_email %}
+<b>Email:</b> {{ doc.contact_email }}
+{% endif %}
+</td>
+
+
+<td width="50%" style="text-align:left">
+
+<b>Ship To</b><br>
+
+<b>{{ doc.company }}</b><br>
+
+{{ doc.shipping_address_display
+    | replace("<br>\nGSTIN:", "|||BREAK|||<b>GSTIN:</b>")
+    | replace("<br>GSTIN:", "|||BREAK|||<b>GSTIN:</b>")
+    | replace("<br>\n", ", ")
+    | replace("<br>", ", ")
+    | replace("|||BREAK|||", "<br>")
+    | replace(", , ", ", ")
+    | trim(", \n")
+}}
+</td>
+
+</tr>
+</tbody>
+</table>
+
+<div style="height:2px;"></div>
+
+<!-- ITEMS TABLE -->
+<table class="items-table">
+
+<!-- thead repeats on every page in wkhtmltopdf:
+     closes the table top on each page + column labels visible everywhere -->
+<thead>
+<tr>
+    <th class="header-bg" width="5%" style="text-align:center; white-space:nowrap; font-size:9px;">S.NO.</th>
+    <th class="header-bg" width="34%" style="text-align:center;">ITEMS</th>
+    <th class="header-bg" width="9%" style="text-align:center;">HSN</th>
+    <th class="header-bg" width="7%" style="text-align:center;">QTY</th>
+    <th class="header-bg" width="7%" style="text-align:center;">UOM</th>
+    <th class="header-bg" width="13%" style="text-align:center;">RATE</th>
+    <th class="header-bg" width="9%" style="text-align:center;">DISC.</th>
+    <th class="header-bg" width="17%" style="text-align:center;">AMOUNT</th>
+</tr>
+</thead>
+
+<tbody>
+{% for item in doc.items %}
+
+<!-- MAIN ROW: item code, name, numbers -->
+<tr class="item-row">
+    <td class="text-center" {% if loop.first %}style="border-top:1px solid #000;"{% endif %}>{{ loop.index }}</td>
+
+    <td style="vertical-align:top; {% if loop.first %}border-top:1px solid #000;{% endif %}">
+        <div><b>{{ item.item_code }}</b></div>
+        <div>{{ item.item_name }}</div>
+    </td>
+
+    <td class="text-center" style="vertical-align:top; white-space:nowrap; {% if loop.first %}border-top:1px solid #000;{% endif %}">
+    {% set hsn_text = (item.gst_hsn_code or "")|string %}
+    <span style="white-space:nowrap;
+             font-size:{% if hsn_text|length > 10 %}7px{% elif hsn_text|length > 8 %}8px{% elif hsn_text|length > 6 %}9px{% else %}10px{% endif %};">{{ hsn_text }}</span>
+</td>
+
+    <td class="text-center" style="vertical-align:top; white-space:nowrap; {% if loop.first %}border-top:1px solid #000;{% endif %}">
+    {% set qty_text = item.qty|string %}
+    <span style="white-space:nowrap;
+             font-size:{% if qty_text|length > 10 %}7px{% elif qty_text|length > 8 %}8px{% elif qty_text|length > 6 %}9px{% else %}10px{% endif %};">{{ qty_text }}</span>
+</td>
+
+    <td class="text-center" style="vertical-align:top; white-space:normal; word-break:break-word; overflow-wrap:anywhere; {% if loop.first %}border-top:1px solid #000;{% endif %}">
+        {{ item.uom or "" }}
+    </td>
+
+    {% set rate_text = frappe.utils.fmt_money(item.rate, currency=doc.currency) %}
+
+<td class="text-right" style="vertical-align:top; white-space:nowrap; {% if loop.first %}border-top:1px solid #000;{% endif %}">
+    <span style="white-space:nowrap;
+             font-size:{% if rate_text|length > 20 %}7px{% elif rate_text|length > 17 %}8px{% elif rate_text|length > 14 %}9px{% else %}10px{% endif %};">
+    {{ rate_text }}
+</span>
+</td>
+
+    <td class="text-center" style="vertical-align:top; white-space:normal; overflow-wrap:break-word; {% if loop.first %}border-top:1px solid #000;{% endif %}">
+        {% set disc_amt = (item.price_list_rate or item.rate) * item.qty - item.amount %}
+        {% set disc_text = frappe.utils.fmt_money(disc_amt, currency=doc.currency) %}
+
+<span style="white-space:nowrap;
+             font-size:{% if disc_text|length > 16 %}7px{% elif disc_text|length > 13 %}8px{% elif disc_text|length > 10 %}9px{% else %}10px{% endif %};">
+    {{ disc_text }}
+</span><br>
+        <span style="white-space:nowrap; font-size:9px;">({{ item.discount_percentage or 0 }}%)</span>
+    </td>
+
+    {% set amount_text = frappe.utils.fmt_money(item.amount, currency=doc.currency) %}
+
+<td class="text-right" style="vertical-align:top; white-space:nowrap; {% if loop.first %}border-top:1px solid #000;{% endif %}">
+    <span style="white-space:nowrap;
+             font-size:{% if amount_text|length > 20 %}7px{% elif amount_text|length > 17 %}8px{% elif amount_text|length > 14 %}9px{% else %}10px{% endif %};">
+    {{ amount_text }}
+</span>
+</td>
+
+</tr>
+
+<!-- DESCRIPTION ROWS
+     Item description is a Text Editor field = HTML, not plain text.
+     Normalize all HTML line-break tags (<br>, <p>, <div>, <li>) into \n
+     FIRST, then split — so every visual line becomes its own small <tr>
+     and wkhtmltopdf can paginate anywhere inside a long description. -->
+{% set desc_norm = (item.description or "")
+    | replace('\r', '')
+    | replace('<br>', '\n')
+    | replace('<br/>', '\n')
+    | replace('<br />', '\n')
+    | replace('<BR>', '\n')
+    | replace('</p>', '\n')
+    | replace('</P>', '\n')
+    | replace('</div>', '\n')
+    | replace('</li>', '\n')
+    | replace('<li>', '\u2022 ')
+%}
+{% set desc_lines = desc_norm.split('\n') %}
+{% for line in desc_lines %}
+{% set clean_line = line | striptags %}
+{% if clean_line.strip() %}
+<tr class="desc-row">
+    <td></td>
+    <td style="white-space:normal; word-break:break-word; overflow-wrap:anywhere;">{{ clean_line }}</td>
+    <td></td>
+    <td></td>
+    <td></td>
+    <td></td>
+    <td></td>
+    <td></td>
+</tr>
+{% endif %}
+{% endfor %}
+
+<!-- small spacer row between items -->
+<tr class="desc-row">
+    <td style="height:5px;"></td>
+    <td></td><td></td><td></td><td></td><td></td><td></td><td></td>
+</tr>
+
+{% endfor %}
+
+{% for lbl, amt in tax_ns.rows %}
+<tr class="item-row">
+    <td></td>
+    <td class="text-right" style="font-style:italic; font-size:9px; padding-right:6px;">{{ lbl }}</td>
+    <td class="text-center"></td>
+    <td class="text-center"></td>
+    <td class="text-center"></td>
+    <td class="text-center"></td>
+    <td class="text-center"></td>
+    <td class="text-right">{{ frappe.utils.fmt_money(amt, currency=doc.currency) }}</td>
+</tr>
+{% endfor %}
+
+{% set total_qty = doc.items | sum(attribute='qty') %}
+
+<!-- TOTALS ROW: regular tbody row (NOT tfoot) so it renders exactly once -->
+<tr class="totals-row">
+    <td class="header-bg" style="border-top:1px solid #000;"></td>
+
+    <td class="text-right header-bg" style="border-top:1px solid #000;">
+        <b>TOTAL</b>
+    </td>
+
+    <td class="text-center header-bg" style="border-top:1px solid #000;"></td>
+    {% set total_qty_text = (total_qty|int|string) if (total_qty % 1 == 0) else (total_qty|string) %}
+    <td class="text-center header-bg" style="border-top:1px solid #000; white-space:nowrap;">
+        <b><span style="white-space:nowrap; font-size:{% if total_qty_text|length > 8 %}8px{% elif total_qty_text|length > 6 %}9px{% else %}10px{% endif %};">{{ total_qty_text }}</span></b>
+    </td>
+    <td class="header-bg" style="border-top:1px solid #000;"></td>
+    <td class="header-bg" style="border-top:1px solid #000;"></td>
+    <td class="header-bg" style="border-top:1px solid #000;"></td>
+
+    <td class="text-right header-bg" style="border-top:1px solid #000;">
+       <b>{{ frappe.utils.fmt_money(doc.rounded_total or doc.grand_total, currency=doc.currency) }}</b>
+    </td>
+</tr>
+
+</tbody>
+
+<!-- PAGE-END CLOSER: wkhtmltopdf repeats tfoot at the bottom of every page.
+     This empty tfoot carries only a top border line, so the table frame
+     is visually closed at each page break. Zero height = no layout impact. -->
+<tfoot>
+<tr>
+    <td colspan="8" style="border:none !important; border-top:1px solid #000 !important; padding:0 !important; height:0; font-size:0; line-height:0;"></td>
+</tr>
+</tfoot>
+
+</table>
+
+<div style="height:2px;"></div>
+
+{% set ns = namespace(
+    taxable=0,
+    cgst=0,
+    sgst=0,
+    igst=0,
+    total=0,
+    printed=[]
+) %}
+
+<table class="hsn-summary">
+
+<thead>
+{%- if is_inter_state -%}
+<tr>
+    <th rowspan="2">HSN/SAC</th>
+    <th rowspan="2">Taxable Value</th>
+    <th colspan="2">IGST</th>
+    <th rowspan="2">Total Tax Amount</th>
+</tr>
+<tr>
+    <th>Rate</th>
+    <th>Amount</th>
+</tr>
+{%- else -%}
+<tr>
+    <th rowspan="2">HSN/SAC</th>
+    <th rowspan="2">Taxable Value</th>
+    <th colspan="2">CGST</th>
+    <th colspan="2">SGST</th>
+    <th rowspan="2">Total Tax Amount</th>
+</tr>
+<tr>
+    <th>Rate</th>
+    <th>Amount</th>
+    <th>Rate</th>
+    <th>Amount</th>
+</tr>
+{%- endif -%}
+</thead>
+
+<tbody>
+
+{% for item in doc.items %}
+
+{% set hsn = item.gst_hsn_code or item.item_code %}
+{% set igst_r = item.igst_rate or 0 %}
+{% set cgst_r = item.cgst_rate or 0 %}
+{% set sgst_r = item.sgst_rate or 0 %}
+{% set combined_r = igst_r if igst_r > 0 else (cgst_r + sgst_r) %}
+{% set rate_key = combined_r if is_inter_state else (cgst_r, sgst_r) %}
+{% set group_key = (hsn, rate_key) %}
+
+{% if group_key not in ns.printed %}
+{% set ns.printed = ns.printed + [group_key] %}
+
+{% set row = namespace(amount=0, cgst_rate=cgst_r, sgst_rate=sgst_r, igst_rate=combined_r) %}
+
+{% for i in doc.items %}
+    {% set i_igst_r = i.igst_rate or 0 %}
+    {% set i_cgst_r = i.cgst_rate or 0 %}
+    {% set i_sgst_r = i.sgst_rate or 0 %}
+    {% set i_combined_r = i_igst_r if i_igst_r > 0 else (i_cgst_r + i_sgst_r) %}
+    {% set i_rate_key = i_combined_r if is_inter_state else (i_cgst_r, i_sgst_r) %}
+    {% if (i.gst_hsn_code or i.item_code) == hsn and i_rate_key == rate_key %}
+        {% set row.amount = row.amount + (i.amount or 0) %}
+    {% endif %}
+{% endfor %}
+
+{% if is_inter_state %}
+    {% set igst_amt = row.amount * row.igst_rate / 100 %}
+    {% set total_tax = igst_amt %}
+    <tr>
+        <td>{{ hsn }}</td>
+        <td>{{ frappe.utils.fmt_money(row.amount, currency=doc.currency) }}</td>
+        <td>{{ row.igst_rate|round(2) }}%</td>
+        <td>{{ frappe.utils.fmt_money(igst_amt, currency=doc.currency) }}</td>
+        <td>{{ frappe.utils.fmt_money(total_tax, currency=doc.currency) }}</td>
+    </tr>
+    {% set ns.igst = ns.igst + igst_amt %}
+{% else %}
+    {% set cgst_amt = row.amount * row.cgst_rate / 100 %}
+    {% set sgst_amt = row.amount * row.sgst_rate / 100 %}
+    {% set total_tax = cgst_amt + sgst_amt %}
+    <tr>
+        <td>{{ hsn }}</td>
+        <td>{{ frappe.utils.fmt_money(row.amount, currency=doc.currency) }}</td>
+        <td>{{ row.cgst_rate|round(2) }}%</td>
+        <td>{{ frappe.utils.fmt_money(cgst_amt, currency=doc.currency) }}</td>
+        <td>{{ row.sgst_rate|round(2) }}%</td>
+        <td>{{ frappe.utils.fmt_money(sgst_amt, currency=doc.currency) }}</td>
+        <td>{{ frappe.utils.fmt_money(total_tax, currency=doc.currency) }}</td>
+    </tr>
+    {% set ns.cgst = ns.cgst + cgst_amt %}
+    {% set ns.sgst = ns.sgst + sgst_amt %}
+{% endif %}
+
+{% set ns.taxable = ns.taxable + row.amount %}
+{% set ns.total = ns.total + total_tax %}
+
+{% endif %}
+{% endfor %}
+
+<!-- HSN total as regular tbody row (not tfoot) -->
+{%- if is_inter_state -%}
+<tr>
+    <td>Total</td>
+    <td>{{ frappe.utils.fmt_money(ns.taxable, currency=doc.currency) }}</td>
+    <td></td>
+    <td>{{ frappe.utils.fmt_money(ns.igst, currency=doc.currency) }}</td>
+    <td>{{ frappe.utils.fmt_money(ns.total, currency=doc.currency) }}</td>
+</tr>
+{%- else -%}
+<tr>
+    <td>Total</td>
+    <td>{{ frappe.utils.fmt_money(ns.taxable, currency=doc.currency) }}</td>
+    <td></td>
+    <td>{{ frappe.utils.fmt_money(ns.cgst, currency=doc.currency) }}</td>
+    <td></td>
+    <td>{{ frappe.utils.fmt_money(ns.sgst, currency=doc.currency) }}</td>
+    <td>{{ frappe.utils.fmt_money(ns.total, currency=doc.currency) }}</td>
+</tr>
+{%- endif -%}
+
+</table>
+
+<!-- AMOUNT IN WORDS -->
+<div style="border: 1px solid black; padding: 3px;">
+    <b>Total Amount (in words)</b><br>
+    {{ frappe.utils.money_in_words(doc.rounded_total or doc.grand_total, doc.currency) }}
+</div>
+
+<div style="height:2px;"></div>
+
+
+<!-- BANK + TERMS -->
+<table style="page-break-inside:avoid;">
+
+<tr>
+
+<td width="33.33%" style="text-align:left">
+<b>Bank Details</b><br>
+Name: {{ doc.company }}<br>
+IFSC Code: YESB0000709<br>
+Account No: 070927000000206<br>
+Bank: Yes Bank
+</td>
+
+<td width="33.33%" style="text-align:left">
+<b>Payment Terms:</b><br>
+
+{% if doc.payment_schedule %}
+    {% for p in doc.payment_schedule %}
+        <b>{{ p.payment_term }}</b><br>
+        {{ (p.description or "") | replace('\n', '<br>') }}
+    {% endfor %}
+{% endif %}
+</td>
+
+<td width="33.33%" style="height:65px; position:relative;" class="text-center">
+
+<div style="position:absolute; bottom:0; width:100%;">
+Authorised Signatory For<br>
+{{ doc.company }}
+</div>
+
+</td>
+
+</tr>
+
+</table>
+
+<div style="height:2px;"></div>
