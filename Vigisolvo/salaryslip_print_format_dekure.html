@@ -1,1 +1,237 @@
+{%- set employee = frappe.get_doc("Employee", doc.employee) -%}
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+    * { box-sizing: border-box; }
+    body {
+        font-family: Arial, Helvetica, sans-serif;
+        font-size: 11px;
+        color: #000;
+        margin: 0;
+        padding: 0;
+    }
+    .outer-box {
+        border: 1px solid #000;
+        width: 100%;
+        padding: 6px;
+    }
+    table {
+        width: 100%;
+        border-collapse: collapse;
+    }
+    .no-border td, .no-border th {
+        border: none;
+    }
+    .header-table td {
+        vertical-align: middle;
+        text-align: center;
+        padding:0;
+    }
+    .company-name {
+        font-size: 16px;
+        font-weight: bold;
+        margin: 0;
+        padding: 0;
+    }
+    .company-address {
+        font-size: 10px;
+        margin: 2px 0;
+        line-height: 1.2;
+    }
+    .slip-title {
+        font-size: 12px;
+        font-weight: bold;
+        text-align: center;
+        margin-top: 4px;
+        margin-bottom: 0;
+    }
+    .slip-subtitle {
+        font-size: 10px;
+        text-align: center;
+        margin: 0;
+    }
+    .info-table td, .info-table th {
+        border: 1px solid #000;
+        padding: 3px 6px;
+        font-size: 10.5px;
+    }
+    .info-label {
+        font-weight: bold;
+        width: 14%;
+    }
+    .info-value {
+        width: 19%;
+    }
+    .earn-table td, .earn-table th {
+        border: 1px solid #000;
+        padding: 3px 6px;
+        font-size: 10.5px;
+        text-align: left;
+    }
+    .earn-table th {
+        font-weight: bold;
+        background: #f2f2f2;
+    }
+    .amount-cell {
+        text-align: right;
+    }
+    .total-row td {
+        font-weight: bold;
+    }
+    .footer-note {
+        font-size: 9px;
+        font-style: italic;
+        padding-top: 4px;
+        text-align: left;
+    }
+    img.logo {
+        max-height: 55px;
+        max-width: 150px;
+    }
+</style>
+</head>
+<body>
+<div class="outer-box">
 
+    <!-- ===== Header : Logo + Company Name/Address ===== -->
+    <table class="header-table no-border">
+    <tr>
+        <!-- Logo -->
+        <td style="width:15%; text-align:left; vertical-align:top;">
+            <img class="logo"
+                 src="{{ frappe.utils.get_url() }}/files/Dekure_final.png"
+                 alt="Logo"
+                 style="max-height:55px; max-width:150px;">
+        </td>
+
+        <!-- Company Details -->
+        <td style="width:70%; text-align:center; vertical-align:top;">
+            <div class="company-name">{{ doc.company }}</div>
+
+            <div class="company-address">
+                Address :- 606, 6th Floor, Yash Aqua, Vijay Char Rasta, University Road,
+                Navrangpura,<br>
+                Ahmedabad. AHMEDABAD-380009
+            </div>
+
+            <div class="slip-title">
+                Salary Slip for the Month {{ frappe.utils.formatdate(doc.start_date, "MMMM-yyyy") }}
+            </div>
+
+            <div class="slip-subtitle">
+                ( From {{ frappe.utils.formatdate(doc.start_date, "dd - MMM - yyyy") }}
+                To {{ frappe.utils.formatdate(doc.end_date, "dd - MMM - yyyy") }} )
+            </div>
+        </td>
+
+        <!-- Empty column to balance the logo -->
+        <td style="width:15%;"></td>
+    </tr>
+</table>
+
+    <!-- ===== Employee Info ===== -->
+    <table class="info-table">
+        <tr>
+            <td class="info-label">Employee Code</td>
+            <td class="info-value">{{ doc.employee }}</td>
+            <td class="info-label">UAN No</td>
+            <td class="info-value">{{ employee.uan or "" }}</td>
+            <td class="info-label">Month Days</td>
+            <td class="info-value">{{ doc.total_working_days }}</td>
+        </tr>
+        <tr>
+            <td class="info-label">Employee Name</td>
+            <td class="info-value">{{ doc.employee_name }}</td>
+            <td class="info-label">PF No</td>
+            <td class="info-value">{{ employee.provident_fund_account or "" }}</td>
+            <td class="info-label">Present</td>
+            <td class="info-value">{{ doc.payment_days - (doc.leave_without_pay or 0) }}</td>
+        </tr>
+        <tr>
+            <td class="info-label">Date Of Joining</td>
+            <td class="info-value">{{ frappe.utils.formatdate(employee.date_of_joining, "dd - MMM - yyyy") }}</td>
+            <td class="info-label">PAN No</td>
+            <td class="info-value">{{ employee.pan_number or "" }}</td>
+            <td class="info-label">Weekoff</td>
+            <td class="info-value">{{ doc.get("weekoff_days", "") }}</td>
+        </tr>
+        <tr>
+            <td class="info-label">Branch</td>
+            <td class="info-value">{{ employee.branch or "" }}</td>
+            <td class="info-label">ESIC No</td>
+            <td class="info-value">{{ employee.esic_number or "" }}</td>
+            <td class="info-label">Holiday</td>
+            <td class="info-value">{{ doc.get("holiday_days", "") }}</td>
+        </tr>
+        <tr>
+            <td class="info-label">Department</td>
+            <td class="info-value">{{ employee.department or "" }}</td>
+            <td class="info-label"></td>
+            <td class="info-value"></td>
+            <td class="info-label">Paid Leave</td>
+            <td class="info-value">{{ doc.get("paid_leave_days", "") }}</td>
+        </tr>
+        <tr>
+            <td class="info-label">Designation</td>
+            <td class="info-value">{{ doc.designation }}</td>
+            <td class="info-label"></td>
+            <td class="info-value"></td>
+            <td class="info-label">Unpaid Leave</td>
+            <td class="info-value">{{ doc.leave_without_pay or 0 }}</td>
+        </tr>
+    </table>
+
+    <!-- ===== Earnings / Deductions ===== -->
+    <table class="earn-table">
+        <tr>
+            <tr>
+              <th style="width:21%; color:#000; font-weight:bold; background:#f2f2f2;">Earning Heads</th>
+              <th style="width:12%; color:#000; font-weight:bold; background:#f2f2f2;">Fixed Rate</th>
+              <th style="width:12%; color:#000; font-weight:bold; background:#f2f2f2;">Earnings</th>
+              <th style="width:21%; color:#000; font-weight:bold; background:#f2f2f2;">Deduction Heads</th>
+              <th style="width:12%; color:#000; font-weight:bold; background:#f2f2f2;">Deductions</th>
+          </tr>
+        </tr>
+        {%- set max_rows = [doc.earnings|length, doc.deductions|length]|max -%}
+        {%- for i in range(max_rows) %}
+        <tr>
+            {%- if i < doc.earnings|length %}
+            <td>{{ doc.earnings[i].salary_component }}</td>
+            <td class="amount-cell">{{ "%.0f"|format(doc.earnings[i].default_amount or doc.earnings[i].amount) }}</td>
+            <td class="amount-cell">{{ "%.0f"|format(doc.earnings[i].amount) }}</td>
+            {%- else %}
+            <td></td><td></td><td></td>
+            {%- endif %}
+            {%- if i < doc.deductions|length %}
+            <td>{{ doc.deductions[i].salary_component }}</td>
+            <td class="amount-cell">{{ "%.0f"|format(doc.deductions[i].amount) }}</td>
+            {%- else %}
+            <td></td><td></td>
+            {%- endif %}
+        </tr>
+        {%- endfor %}
+        <tr class="total-row">
+            <td>Gross Earning</td>
+            <td class="amount-cell">{{ "%.0f"|format(doc.gross_pay) }}</td>
+            <td class="amount-cell">{{ "%.0f"|format(doc.gross_pay) }}</td>
+            <td>Gross Deductions</td>
+            <td class="amount-cell">{{ "%.0f"|format(doc.total_deduction) }}</td>
+        </tr>
+    </table>
+
+    <!-- ===== Net Payable ===== -->
+    <table class="earn-table">
+        <tr class="total-row">
+            <td style="width: 21%;">Net Payable</td>
+            <td class="amount-cell" style="width: 12%;">{{ "%.0f"|format(doc.net_pay) }}</td>
+            <td colspan="3" style="width: 67%;"><b>In Words:</b> {{ doc.total_in_words }}</td>
+        </tr>
+    </table>
+
+    <div class="footer-note">*THIS IS COMPUTER GENERATED PAYMENT SLIP NO SIGNATURE IS REQUIRED</div>
+
+</div>
+</body>
+</html>
